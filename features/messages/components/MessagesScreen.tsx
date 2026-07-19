@@ -32,10 +32,13 @@ export function MessagesScreen({
     const supabase = createClient();
 
     const [
-      { data: convData, error: convError },
-      { data: reqData },
+      { data: myMemberships, error: membershipError },
+      { data: reqData, error: requestLoadError },
     ] = await Promise.all([
-      supabase.rpc("get_my_conversations"),
+      supabase
+        .from("conversation_members")
+        .select("conversation_id,last_read_at")
+        .eq("user_id", user.id),
       supabase
         .from("contact_requests")
         .select(
@@ -46,24 +49,110 @@ export function MessagesScreen({
         .order("created_at", { ascending: false }),
     ]);
 
-    if (convError) {
-      setError(convError.message);
+    if (membershipError) {
+      setError(membershipError.message);
+      setConversations([]);
+      return;
     }
 
-    setConversations(
-      (convData ?? []).map((row: Record<string, unknown>) => ({
-        id: String(row.conversation_id),
-        contact: row.contact as ContactProfile,
-        lastMessage: String(
-          row.last_message ?? "Start a voice conversation",
-        ),
-        lastMessageAt: row.last_message_at
-          ? String(row.last_message_at)
-          : null,
-        unreadCount: Number(row.unread_count ?? 0),
-      })),
+    if (requestLoadError) {
+      setError(requestLoadError.message);
+    }
+
+    const memberships = myMemberships ?? [];
+    const conversationIds = memberships.map(
+      (membership) => membership.conversation_id,
     );
 
+    if (conversationIds.length === 0) {
+      setConversations([]);
+      setRequests((reqData ?? []) as unknown as ContactRequest[]);
+      return;
+    }
+
+    const [
+      { data: otherMembers, error: otherMembersError },
+      { data: messageRows, error: messagesError },
+    ] = await Promise.all([
+      supabase
+        .from("conversation_members")
+        .select(
+          "conversation_id,user_id,profile:profiles!conversation_members_user_id_fkey(id,display_name,voicenk_id,preferred_language,avatar_url)",
+        )
+        .in("conversation_id", conversationIds)
+        .neq("user_id", user.id),
+      supabase
+        .from("messages")
+        .select(
+          "id,conversation_id,sender_id,original_transcript,translated_text,created_at",
+        )
+        .in("conversation_id", conversationIds)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    if (otherMembersError) {
+      setError(otherMembersError.message);
+      setConversations([]);
+      return;
+    }
+
+    if (messagesError) {
+      setError(messagesError.message);
+    }
+
+    const allMessages = messageRows ?? [];
+
+    const nextConversations: ConversationSummary[] = (
+      otherMembers ?? []
+    ).map((member) => {
+      const contact = member.profile as unknown as ContactProfile;
+      const membership = memberships.find(
+        (item) => item.conversation_id === member.conversation_id,
+      );
+
+      const conversationMessages = allMessages.filter(
+        (message) =>
+          message.conversation_id === member.conversation_id,
+      );
+
+      const latestMessage = conversationMessages[0] ?? null;
+      const lastReadAt = membership?.last_read_at
+        ? new Date(membership.last_read_at).getTime()
+        : 0;
+
+      const unreadCount = conversationMessages.filter((message) => {
+        if (message.sender_id === user.id) return false;
+
+        return (
+          new Date(message.created_at).getTime() > lastReadAt
+        );
+      }).length;
+
+      return {
+        id: member.conversation_id,
+        contact,
+        lastMessage: latestMessage
+          ? latestMessage.sender_id === user.id
+            ? latestMessage.original_transcript
+            : latestMessage.translated_text
+          : "Start a voice conversation",
+        lastMessageAt: latestMessage?.created_at ?? null,
+        unreadCount,
+      };
+    });
+
+    nextConversations.sort((first, second) => {
+      const firstTime = first.lastMessageAt
+        ? new Date(first.lastMessageAt).getTime()
+        : 0;
+      const secondTime = second.lastMessageAt
+        ? new Date(second.lastMessageAt).getTime()
+        : 0;
+
+      return secondTime - firstTime;
+    });
+
+    setConversations(nextConversations);
     setRequests((reqData ?? []) as unknown as ContactRequest[]);
   }, [user]);
 
