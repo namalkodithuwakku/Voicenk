@@ -9,6 +9,21 @@ type AuthModalProps = {
   onClose: () => void;
 };
 
+function getRedirectUrl() {
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+
+  if (siteUrl) {
+    return `${siteUrl}/auth/callback`;
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}/auth/callback`;
+  }
+
+  return "/auth/callback";
+}
+
 export function AuthModal({ open, onClose }: AuthModalProps) {
   const { configured } = useAuth();
   const [email, setEmail] = useState("");
@@ -25,7 +40,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
     const { error: authError } = await createClient().auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: getRedirectUrl(),
       },
     });
 
@@ -43,7 +58,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
     const { error: authError } = await createClient().auth.signInWithOtp({
       email: email.trim(),
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: getRedirectUrl(),
         shouldCreateUser: true,
       },
     });
