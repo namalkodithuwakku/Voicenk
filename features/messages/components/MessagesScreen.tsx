@@ -1,71 +1,105 @@
 "use client";
 
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessagesIcon } from "@/components/ui/Icons";
 import { useAuth } from "@/features/auth/hooks/useAuth";
-import { getLanguageName } from "@/lib/languages";
+import { createClient } from "@/lib/supabase/client";
+import { ConversationView } from "@/features/messages/components/ConversationView";
+import type { ContactProfile, ContactRequest, ConversationSummary } from "@/types/messaging";
 
 export function MessagesScreen({ onSignIn }: { onSignIn: () => void }) {
   const { user, profile, loading } = useAuth();
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [requests, setRequests] = useState<ContactRequest[]>([]);
+  const [selected, setSelected] = useState<ConversationSummary | null>(null);
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<ContactProfile[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[68vh] items-center justify-center text-sm font-bold text-muted">
-        Checking your session…
-      </div>
-    );
+  const load = useCallback(async () => {
+    if (!user) return;
+    const supabase = createClient();
+    const [{ data: convData, error: convError }, { data: reqData }] = await Promise.all([
+      supabase.rpc("get_my_conversations"),
+      supabase.from("contact_requests").select("id,sender_id,recipient_id,status,created_at,sender:profiles!contact_requests_sender_id_fkey(id,display_name,voicenk_id,preferred_language,avatar_url)").eq("recipient_id", user.id).eq("status", "pending").order("created_at", { ascending: false }),
+    ]);
+    if (convError) setError(convError.message);
+    setConversations((convData ?? []).map((row: Record<string, unknown>) => ({
+      id: String(row.conversation_id),
+      contact: row.contact as ContactProfile,
+      lastMessage: String(row.last_message ?? "Start a voice conversation"),
+      lastMessageAt: row.last_message_at ? String(row.last_message_at) : null,
+      unreadCount: Number(row.unread_count ?? 0),
+    })));
+    setRequests((reqData ?? []) as unknown as ContactRequest[]);
+  }, [user]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!user) return;
+    const supabase = createClient();
+    const channel = supabase.channel(`messages-home-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => void load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "contact_requests" }, () => void load())
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load, user]);
+
+  useEffect(() => {
+    if (!user || search.trim().length < 2) { setResults([]); return; }
+    const timer = setTimeout(async () => {
+      const q = search.trim().replace(/^@/, "");
+      const { data } = await createClient().from("profiles").select("id,display_name,voicenk_id,preferred_language,avatar_url").neq("id", user.id).or(`voicenk_id.ilike.%${q}%,display_name.ilike.%${q}%`).limit(12);
+      setResults((data ?? []) as ContactProfile[]);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, user]);
+
+  async function sendRequest(recipientId: string) {
+    if (!user) return; setBusy(true); setError("");
+    const { error: requestError } = await createClient().from("contact_requests").upsert({ sender_id: user.id, recipient_id: recipientId, status: "pending" }, { onConflict: "sender_id,recipient_id" });
+    if (requestError) setError(requestError.message); else setSearch("");
+    setBusy(false);
   }
 
-  if (!user) {
-    return (
-      <section className="flex min-h-[68vh] flex-col justify-center py-8">
-        <div className="rounded-[2rem] border border-border bg-surface p-6 shadow-[var(--shadow-soft)]">
-          <div className="mb-6 grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-accent-strong">
-            <MessagesIcon className="h-7 w-7" />
-          </div>
-          <p className="mb-2 text-xs font-black uppercase tracking-[0.18em] text-accent-strong">
-            Send mode
-          </p>
-          <h1 className="text-3xl font-black leading-tight tracking-[-0.04em]">
-            Sign in when you’re ready to send.
-          </h1>
-          <p className="mt-4 text-sm font-medium leading-6 text-muted">
-            Interpreter mode remains available without an account. Sign in to
-            save your identity and use multilingual voice messaging.
-          </p>
-          <button
-            type="button"
-            onClick={onSignIn}
-            className="mt-6 min-h-14 w-full rounded-2xl bg-foreground px-5 font-black text-white"
-          >
-            Continue to sign in
-          </button>
-        </div>
-      </section>
-    );
+  async function respond(requestId: string, accept: boolean) {
+    setBusy(true); setError("");
+    const supabase = createClient();
+    if (accept) {
+      const { error: rpcError } = await supabase.rpc("accept_contact_request", { request_id_input: requestId });
+      if (rpcError) setError(rpcError.message);
+    } else {
+      await supabase.from("contact_requests").update({ status: "declined" }).eq("id", requestId);
+    }
+    await load(); setBusy(false);
   }
+
+  if (loading) return <div className="flex h-full items-center justify-center text-sm font-bold text-muted">Checking your session…</div>;
+  if (!user) return <GuestState onSignIn={onSignIn} />;
+  if (selected) return <ConversationView conversation={selected} currentUserId={user.id} sourceLanguage={profile?.preferred_language ?? "en"} onBack={() => { setSelected(null); void load(); }} />;
 
   return (
-    <section className="py-6">
-      <div className="rounded-[2rem] bg-foreground p-6 text-white shadow-[var(--shadow-soft)]">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-accent">
-          Welcome, {profile?.display_name ?? "Voicenk user"}
-        </p>
-        <h1 className="mt-2 text-3xl font-black leading-tight tracking-[-0.04em]">
-          Your voice conversations will live here.
-        </h1>
-        <p className="mt-4 text-sm font-medium leading-6 text-white/65">
-          Preferred language:{" "}
-          {profile ? getLanguageName(profile.preferred_language) : "Not set"}
-        </p>
-      </div>
+    <section className="flex h-full min-h-0 flex-col py-3">
+      <div className="shrink-0"><h1 className="text-2xl font-black tracking-[-0.04em]">Messages</h1><p className="text-xs font-semibold text-muted">Every person hears their own language.</p></div>
+      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or @VoicenkID" className="mt-3 min-h-12 shrink-0 rounded-2xl bg-surface-soft px-4 text-sm font-bold outline-none focus:ring-2 focus:ring-accent/30" />
 
-      <div className="mt-5 rounded-[2rem] border border-dashed border-border p-8 text-center">
-        <MessagesIcon className="mx-auto h-8 w-8 text-muted" />
-        <p className="mt-4 font-black">No conversations yet</p>
-        <p className="mt-2 text-sm font-medium leading-6 text-muted">
-          Contacts and voice messaging arrive in the Messaging package.
-        </p>
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+        {search.trim().length >= 2 && <div className="space-y-2">{results.map((item) => <UserRow key={item.id} profile={item} action="Add" disabled={busy} onAction={() => void sendRequest(item.id)} />)}{results.length === 0 && <p className="py-6 text-center text-sm font-bold text-muted">No users found.</p>}</div>}
+
+        {!search && requests.length > 0 && <div className="mb-4"><p className="mb-2 text-[10px] font-black uppercase tracking-widest text-accent-strong">Contact requests</p><div className="space-y-2">{requests.map((request) => <div key={request.id} className="rounded-2xl bg-accent-soft p-3"><UserRow profile={request.sender} action="Accept" disabled={busy} onAction={() => void respond(request.id, true)} /><button type="button" onClick={() => void respond(request.id, false)} className="mt-2 w-full text-xs font-black text-muted">Decline</button></div>)}</div></div>}
+
+        {!search && <div className="space-y-1">{conversations.map((conversation) => <button key={conversation.id} type="button" onClick={() => setSelected(conversation)} className="flex w-full items-center gap-3 rounded-2xl p-3 text-left hover:bg-surface-soft"><Avatar profile={conversation.contact} /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-black">{conversation.contact.display_name}</p><span className="text-[10px] font-bold text-muted">{formatDate(conversation.lastMessageAt)}</span></div><p className="truncate text-xs font-semibold text-muted">{conversation.lastMessage}</p></div>{conversation.unreadCount > 0 && <span className="grid h-6 min-w-6 place-items-center rounded-full bg-accent px-1 text-[10px] font-black">{conversation.unreadCount}</span>}</button>)}</div>}
+
+        {!search && conversations.length === 0 && requests.length === 0 && <div className="mt-12 text-center"><MessagesIcon className="mx-auto h-8 w-8 text-muted" /><p className="mt-3 font-black">No conversations yet</p><p className="mt-1 text-xs font-semibold text-muted">Search a Voicenk ID and add your first contact.</p></div>}
+        {error && <p className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">{error}</p>}
       </div>
     </section>
   );
 }
+
+function GuestState({ onSignIn }: { onSignIn: () => void }) { return <section className="flex h-full items-center"><div className="rounded-[2rem] border border-border p-6 shadow-[var(--shadow-soft)]"><MessagesIcon className="h-8 w-8 text-accent-strong" /><h1 className="mt-5 text-3xl font-black tracking-[-0.04em]">Sign in to send voice messages.</h1><p className="mt-3 text-sm font-medium leading-6 text-muted">Interpreter stays free without an account.</p><button onClick={onSignIn} className="mt-5 min-h-14 w-full rounded-2xl bg-foreground font-black text-white">Continue to sign in</button></div></section>; }
+function UserRow({ profile, action, disabled, onAction }: { profile: ContactProfile; action: string; disabled: boolean; onAction: () => void }) { return <div className="flex items-center gap-3 rounded-2xl bg-surface-soft p-3"><Avatar profile={profile} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{profile.display_name}</p><p className="truncate text-xs font-bold text-accent-strong">@{profile.voicenk_id}</p></div><button type="button" disabled={disabled} onClick={onAction} className="rounded-xl bg-foreground px-3 py-2 text-xs font-black text-white disabled:opacity-50">{action}</button></div>; }
+function Avatar({ profile }: { profile: ContactProfile }) { return <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-foreground font-black text-accent">{profile.avatar_url ? <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" /> : profile.display_name.slice(0,1).toUpperCase()}</div>; }
+function formatDate(value: string | null) { if (!value) return ""; const d=new Date(value); return d.toLocaleDateString(undefined,{month:"short",day:"numeric"}); }

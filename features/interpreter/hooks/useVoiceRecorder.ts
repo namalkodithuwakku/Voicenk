@@ -126,7 +126,7 @@ export function useVoiceRecorder() {
     const result = await resultPromise;
 
     if (result.durationMs < MIN_RECORDING_MS) {
-      setPermissionError("That was too short. Hold the microphone and speak again.");
+      setPermissionError("That was too short. Record a little longer and try again.");
       return null;
     }
 
