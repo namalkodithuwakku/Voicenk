@@ -1,5 +1,17 @@
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
+const transcriptionPrompts: Record<string, string> = {
+  si:
+    "The speaker is speaking Sinhala. Transcribe accurately in Sinhala script. " +
+    "Expect Sri Lankan names, hotel names, room types, dates, times, prices, " +
+    "booking references, phone numbers, and mixed English words.",
+
+  ta:
+    "The speaker is speaking Tamil. Transcribe accurately in Tamil script. " +
+    "Expect Sri Lankan names, hotel names, room types, dates, times, prices, " +
+    "booking references, phone numbers, and mixed English words.",
+};
+
 export function getOpenAIConfig() {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
 
@@ -36,8 +48,18 @@ export async function transcribeAudio(params: {
   body.set("model", config.transcribeModel);
   body.set("response_format", "json");
 
-  if (params.sourceLanguage !== "auto") {
+  const transcriptionPrompt =
+    transcriptionPrompts[params.sourceLanguage];
+
+  if (
+    params.sourceLanguage !== "auto" &&
+    !transcriptionPrompt
+  ) {
     body.set("language", params.sourceLanguage);
+  }
+
+  if (transcriptionPrompt) {
+    body.set("prompt", transcriptionPrompt);
   }
 
   const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
@@ -157,13 +179,20 @@ export async function createSpeech(params: {
 
   if (!response.ok) {
     const data = await readJsonResponse(response);
-    throw new Error(getOpenAIError(data, "Voice generation failed."));
+
+    throw new Error(
+      getOpenAIError(data, "Voice generation failed."),
+    );
   }
 
-  return Buffer.from(await response.arrayBuffer()).toString("base64");
+  return Buffer.from(
+    await response.arrayBuffer(),
+  ).toString("base64");
 }
 
-async function readJsonResponse(response: Response): Promise<unknown> {
+async function readJsonResponse(
+  response: Response,
+): Promise<unknown> {
   const text = await response.text();
 
   if (!text) return {};
@@ -175,7 +204,10 @@ async function readJsonResponse(response: Response): Promise<unknown> {
   }
 }
 
-function getOpenAIError(data: unknown, fallback: string) {
+function getOpenAIError(
+  data: unknown,
+  fallback: string,
+) {
   if (
     typeof data === "object" &&
     data &&
