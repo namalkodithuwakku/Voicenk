@@ -1,5 +1,5 @@
 import type { AppTab } from "@/types/navigation";
-import { GlobeIcon, MessagesIcon, UserIcon } from "@/components/ui/Icons";
+import { MessagesIcon, GlobeIcon, UserIcon } from "@/components/ui/Icons";
 
 type BottomNavigationProps = {
   activeTab: AppTab;
@@ -17,8 +17,8 @@ export function BottomNavigation({
   onChange,
 }: BottomNavigationProps) {
   return (
-    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-md border-t border-border/80 bg-surface/95 px-4 pt-2 backdrop-blur-xl">
-      <div className="grid grid-cols-3 gap-2">
+    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-md shrink-0 border-t border-border/80 bg-surface/98 px-3 pt-1.5 backdrop-blur-xl">
+      <div className="grid grid-cols-3 gap-1.5">
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -30,14 +30,14 @@ export function BottomNavigation({
               onClick={() => onChange(item.id)}
               aria-label={item.label}
               aria-current={isActive ? "page" : undefined}
-              className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl transition ${
+              className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl transition ${
                 isActive
                   ? "bg-accent-soft text-accent-strong"
-                  : "text-muted hover:bg-surface-soft"
+                  : "text-muted"
               }`}
             >
-              <Icon className="h-5 w-5" />
-              <span className="text-[11px] font-extrabold">{item.label}</span>
+              <Icon className="h-4.5 w-4.5" />
+              <span className="text-[10px] font-extrabold">{item.label}</span>
             </button>
           );
         })}

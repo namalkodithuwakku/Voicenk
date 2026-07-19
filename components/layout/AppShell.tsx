@@ -15,10 +15,10 @@ export function AppShell() {
   const [authOpen, setAuthOpen] = useState(false);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-surface shadow-[var(--shadow-soft)]">
+    <main className="mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden bg-surface shadow-[var(--shadow-soft)]">
       <AppHeader activeTab={activeTab} />
 
-      <section className="flex-1 overflow-y-auto px-5 pb-28">
+      <section className="min-h-0 flex-1 overflow-hidden px-4 pb-20">
         {activeTab === "messages" && (
           <MessagesScreen onSignIn={() => setAuthOpen(true)} />
         )}
@@ -29,6 +29,7 @@ export function AppShell() {
       </section>
 
       <BottomNavigation activeTab={activeTab} onChange={setActiveTab} />
+
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       <ProfileSetupModal />
     </main>

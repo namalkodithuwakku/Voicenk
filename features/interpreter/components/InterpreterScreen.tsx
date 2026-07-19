@@ -93,12 +93,7 @@ export function InterpreterScreen() {
 
         setResult(data);
         setStatus("ready");
-
-        await player.loadAndPlay(
-          data.audioBase64,
-          data.audioMimeType,
-          true,
-        );
+        await player.loadAndPlay(data.audioBase64, data.audioMimeType, true);
       } catch (requestError) {
         if (
           requestError instanceof DOMException &&
@@ -217,22 +212,21 @@ export function InterpreterScreen() {
               : "Press and hold to speak";
 
   return (
-    <section className="py-6">
-      <div className="rounded-[2rem] bg-foreground p-6 text-white shadow-[var(--shadow-soft)]">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-accent">
+    <section className="flex h-full min-h-0 flex-col py-3">
+      <div className="shrink-0 rounded-[1.5rem] bg-foreground p-4 text-white shadow-[var(--shadow-soft)]">
+        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-accent">
           Interpreter · No account needed
         </p>
-        <h1 className="mt-2 text-3xl font-black leading-tight tracking-[-0.04em]">
+        <h1 className="mt-1.5 text-2xl font-black leading-tight tracking-[-0.04em]">
           Speak naturally. Let Voicenk handle the language.
         </h1>
-        <p className="mt-4 text-sm font-medium leading-6 text-white/65">
-          Press and hold the microphone while speaking. Release only when you
-          finish.
+        <p className="mt-2 text-xs font-medium leading-5 text-white/65">
+          Press and hold while speaking. Release when finished.
         </p>
       </div>
 
-      <div className="mt-5 rounded-[2rem] border border-border bg-surface p-5 shadow-[var(--shadow-soft)]">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+      <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-[1.5rem] border border-border bg-surface p-3.5 shadow-[var(--shadow-soft)]">
+        <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2">
           <LanguageButton
             label="Speaker"
             language={sourceLabel}
@@ -244,9 +238,9 @@ export function InterpreterScreen() {
             onClick={swapLanguages}
             disabled={status === "recording" || status === "processing"}
             aria-label="Switch languages"
-            className="grid h-11 w-11 place-items-center rounded-full bg-accent-soft text-accent-strong disabled:opacity-40"
+            className="grid h-9 w-9 place-items-center rounded-full bg-accent-soft text-accent-strong disabled:opacity-40"
           >
-            <SwapIcon className="h-5 w-5" />
+            <SwapIcon className="h-4 w-4" />
           </button>
 
           <LanguageButton
@@ -268,7 +262,7 @@ export function InterpreterScreen() {
           }}
           onContextMenu={(event) => event.preventDefault()}
           disabled={status === "processing"}
-          className={`mt-8 flex min-h-24 w-full touch-none select-none items-center justify-center gap-3 rounded-[1.8rem] px-6 font-black shadow-lg transition active:scale-[0.985] disabled:cursor-wait ${
+          className={`mt-4 flex min-h-16 shrink-0 touch-none select-none items-center justify-center gap-2.5 rounded-[1.35rem] px-4 text-sm font-black shadow-lg transition active:scale-[0.985] disabled:cursor-wait ${
             status === "recording"
               ? "animate-pulse bg-red-500 text-white"
               : status === "processing"
@@ -278,30 +272,32 @@ export function InterpreterScreen() {
                   : "bg-accent text-foreground"
           }`}
         >
-          <MicrophoneIcon className="h-7 w-7" />
+          <MicrophoneIcon className="h-5 w-5" />
           {micLabel}
         </button>
 
-        <p className="mt-4 text-center text-xs font-bold text-muted">
-          Hold for at least half a second · Maximum 30 seconds
+        <p className="mt-2 shrink-0 text-center text-[10px] font-bold text-muted">
+          Hold 0.5 sec · Maximum 30 sec
         </p>
 
         {visibleError && (
-          <div className="mt-5 rounded-2xl bg-red-50 p-4 text-sm font-bold leading-6 text-red-700">
+          <div className="mt-3 shrink-0 rounded-xl bg-red-50 p-3 text-xs font-bold leading-5 text-red-700">
             {visibleError}
           </div>
         )}
 
         {result && (
-          <InterpreterResultCard
-            result={result}
-            sourceLabel={sourceLabel}
-            targetLabel={targetLabel}
-            isPlaying={player.isPlaying}
-            onReplay={() => void player.replay()}
-            onStop={player.stop}
-            onClear={clearResult}
-          />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <InterpreterResultCard
+              result={result}
+              sourceLabel={sourceLabel}
+              targetLabel={targetLabel}
+              isPlaying={player.isPlaying}
+              onReplay={() => void player.replay()}
+              onStop={player.stop}
+              onClear={clearResult}
+            />
+          </div>
         )}
       </div>
 
@@ -340,12 +336,12 @@ function LanguageButton({
     <button
       type="button"
       onClick={onClick}
-      className="min-w-0 rounded-2xl bg-surface-soft px-3 py-4 text-left transition hover:bg-accent-soft"
+      className="min-w-0 rounded-xl bg-surface-soft px-2.5 py-2.5 text-left transition"
     >
-      <span className="block text-[10px] font-black uppercase tracking-[0.12em] text-muted">
+      <span className="block text-[9px] font-black uppercase tracking-[0.1em] text-muted">
         {label}
       </span>
-      <span className="mt-1 block truncate text-sm font-black text-foreground">
+      <span className="mt-0.5 block truncate text-xs font-black text-foreground">
         {language}
       </span>
     </button>

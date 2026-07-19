@@ -13,10 +13,10 @@ type AppHeaderProps = {
 
 export function AppHeader({ activeTab }: AppHeaderProps) {
   return (
-    <header className="safe-top sticky top-0 z-20 border-b border-border/80 bg-surface/90 px-5 pb-4 backdrop-blur-xl">
+    <header className="safe-top z-20 shrink-0 border-b border-border/80 bg-surface/95 px-4 pb-2.5 backdrop-blur-xl">
       <div className="flex items-center justify-between">
         <BrandMark compact />
-        <div className="rounded-full bg-surface-soft px-3 py-1.5 text-xs font-bold text-muted">
+        <div className="rounded-full bg-surface-soft px-2.5 py-1 text-[10px] font-bold text-muted">
           {pageTitles[activeTab]}
         </div>
       </div>
