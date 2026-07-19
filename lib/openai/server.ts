@@ -1,11 +1,17 @@
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
 export function getOpenAIConfig() {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
 
   if (!apiKey) {
     throw new Error(
-      "OPENAI_API_KEY is missing. Add it to .env.local and restart the app.",
+      "OpenAI is not configured. Add OPENAI_API_KEY to the active project's .env.local file, then stop and restart npm run dev.",
+    );
+  }
+
+  if (!apiKey.startsWith("sk-")) {
+    throw new Error(
+      "OPENAI_API_KEY does not look valid. Check the value in .env.local, then restart npm run dev.",
     );
   }
 

@@ -20,6 +20,8 @@ import type {
 
 type PickerSide = "source" | "target" | null;
 
+const HOLD_DELAY_MS = 450;
+
 export function InterpreterScreen() {
   const [sourceLanguage, setSourceLanguage] = useState("en");
   const [targetLanguage, setTargetLanguage] = useState("fr");
@@ -27,7 +29,12 @@ export function InterpreterScreen() {
   const [status, setStatus] = useState<InterpreterStatus>("idle");
   const [result, setResult] = useState<InterpreterResult | null>(null);
   const [error, setError] = useState("");
+  const [isHolding, setIsHolding] = useState(false);
+
   const abortRef = useRef<AbortController | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pointerIsDownRef = useRef(false);
+  const recordingStartedRef = useRef(false);
 
   const recorder = useVoiceRecorder();
   const player = useInterpreterAudio();
@@ -35,6 +42,13 @@ export function InterpreterScreen() {
   const sourceLabel =
     sourceLanguage === "auto" ? "Auto detect" : getLanguageName(sourceLanguage);
   const targetLabel = getLanguageName(targetLanguage);
+
+  const clearHoldTimer = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  }, []);
 
   const processRecording = useCallback(
     async (blob: Blob) => {
@@ -79,6 +93,7 @@ export function InterpreterScreen() {
 
         setResult(data);
         setStatus("ready");
+
         await player.loadAndPlay(
           data.audioBase64,
           data.audioMimeType,
@@ -103,10 +118,9 @@ export function InterpreterScreen() {
     [player, sourceLanguage, targetLanguage],
   );
 
-  async function startRecording(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (status === "processing") return;
+  async function beginActualRecording() {
+    if (!pointerIsDownRef.current || status === "processing") return;
 
-    event.currentTarget.setPointerCapture?.(event.pointerId);
     recorder.clearPermissionError();
     setError("");
     setResult(null);
@@ -114,13 +128,49 @@ export function InterpreterScreen() {
     setStatus("requesting_permission");
 
     const started = await recorder.start();
+
+    if (!pointerIsDownRef.current) {
+      if (started) recorder.cancel();
+      setStatus("idle");
+      return;
+    }
+
+    recordingStartedRef.current = started;
     setStatus(started ? "recording" : "error");
   }
 
-  async function finishRecording() {
+  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (status === "processing" || recorder.isRecording) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+
+    pointerIsDownRef.current = true;
+    recordingStartedRef.current = false;
+    setIsHolding(true);
+    setError("");
+    clearHoldTimer();
+
+    holdTimerRef.current = setTimeout(() => {
+      void beginActualRecording();
+    }, HOLD_DELAY_MS);
+  }
+
+  async function handlePointerRelease() {
+    pointerIsDownRef.current = false;
+    setIsHolding(false);
+    clearHoldTimer();
+
+    if (!recordingStartedRef.current && !recorder.isRecording) {
+      setStatus("idle");
+      setError("Press and hold the microphone while you speak.");
+      return;
+    }
+
     if (!recorder.isRecording) return;
 
     const recording = await recorder.stop();
+    recordingStartedRef.current = false;
 
     if (!recording) {
       setStatus("error");
@@ -133,10 +183,8 @@ export function InterpreterScreen() {
   function swapLanguages() {
     if (status === "recording" || status === "processing") return;
 
-    const nextSource =
-      sourceLanguage === "auto" ? targetLanguage : targetLanguage;
-    const nextTarget =
-      sourceLanguage === "auto" ? "en" : sourceLanguage;
+    const nextSource = targetLanguage;
+    const nextTarget = sourceLanguage === "auto" ? "en" : sourceLanguage;
 
     setSourceLanguage(nextSource);
     setTargetLanguage(nextTarget);
@@ -162,9 +210,11 @@ export function InterpreterScreen() {
         ? "Translating…"
         : status === "requesting_permission"
           ? "Opening microphone…"
-          : result
-            ? "Hold to speak again"
-            : "Hold to speak";
+          : isHolding
+            ? "Keep holding…"
+            : result
+              ? "Hold to speak again"
+              : "Press and hold to speak";
 
   return (
     <section className="py-6">
@@ -176,8 +226,8 @@ export function InterpreterScreen() {
           Speak naturally. Let Voicenk handle the language.
         </h1>
         <p className="mt-4 text-sm font-medium leading-6 text-white/65">
-          Hold the microphone, speak, then release. The translation appears and
-          plays automatically.
+          Press and hold the microphone while speaking. Release only when you
+          finish.
         </p>
       </div>
 
@@ -208,9 +258,14 @@ export function InterpreterScreen() {
 
         <button
           type="button"
-          onPointerDown={(event) => void startRecording(event)}
-          onPointerUp={() => void finishRecording()}
-          onPointerCancel={() => void finishRecording()}
+          onPointerDown={handlePointerDown}
+          onPointerUp={() => void handlePointerRelease()}
+          onPointerCancel={() => void handlePointerRelease()}
+          onPointerLeave={() => {
+            if (pointerIsDownRef.current) {
+              void handlePointerRelease();
+            }
+          }}
           onContextMenu={(event) => event.preventDefault()}
           disabled={status === "processing"}
           className={`mt-8 flex min-h-24 w-full touch-none select-none items-center justify-center gap-3 rounded-[1.8rem] px-6 font-black shadow-lg transition active:scale-[0.985] disabled:cursor-wait ${
@@ -218,7 +273,9 @@ export function InterpreterScreen() {
               ? "animate-pulse bg-red-500 text-white"
               : status === "processing"
                 ? "bg-surface-soft text-muted"
-                : "bg-accent text-foreground"
+                : isHolding
+                  ? "bg-accent-strong text-white"
+                  : "bg-accent text-foreground"
           }`}
         >
           <MicrophoneIcon className="h-7 w-7" />
@@ -226,7 +283,7 @@ export function InterpreterScreen() {
         </button>
 
         <p className="mt-4 text-center text-xs font-bold text-muted">
-          Maximum recording: 30 seconds
+          Hold for at least half a second · Maximum 30 seconds
         </p>
 
         {visibleError && (
