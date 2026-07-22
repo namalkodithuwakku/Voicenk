@@ -157,6 +157,7 @@ export async function translateText(params: {
 export async function createSpeech(params: {
   text: string;
   targetLanguageName: string;
+  voice?: string;
 }) {
   const config = getOpenAIConfig();
 
@@ -168,7 +169,7 @@ export async function createSpeech(params: {
     },
     body: JSON.stringify({
       model: config.ttsModel,
-      voice: config.ttsVoice,
+      voice: params.voice ?? config.ttsVoice,
       input: params.text.slice(0, 4096),
       response_format: "mp3",
       instructions:

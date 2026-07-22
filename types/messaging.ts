@@ -3,6 +3,9 @@ export type ContactProfile = {
   display_name: string;
   voicenk_id: string;
   preferred_language: string;
+  preferred_voice: string;
+  voice_category: "male" | "female" | "neutral";
+  profile_visibility?: "visible" | "invisible";
   avatar_url: string | null;
 };
 
@@ -23,6 +26,8 @@ export type VoiceMessage = {
   translated_text: string;
   source_language: string;
   target_language: string;
+  translation_status: "required" | "completed" | "not_required" | "failed";
+  sender_voice: string;
   created_at: string;
   delivered_at: string | null;
   played_at: string | null;
@@ -34,5 +39,15 @@ export type ContactRequest = {
   recipient_id: string;
   status: "pending" | "accepted" | "declined";
   created_at: string;
-  sender: ContactProfile;
+  sender?: ContactProfile;
+  recipient?: ContactProfile;
+};
+
+export type ContactRecord = {
+  id: string;
+  user_id: string;
+  contact_id: string;
+  conversation_id: string;
+  created_at: string;
+  profile: ContactProfile;
 };

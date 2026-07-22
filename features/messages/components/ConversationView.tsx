@@ -1,20 +1,12 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { MicrophoneIcon } from "@/components/ui/Icons";
 import { createClient } from "@/lib/supabase/client";
 import { formatRecordingTime } from "@/lib/audio";
 import { useVoiceRecorder } from "@/features/interpreter/hooks/useVoiceRecorder";
-import type {
-  ConversationSummary,
-  VoiceMessage,
-} from "@/types/messaging";
+import type { ConversationSummary, VoiceMessage } from "@/types/messaging";
 
 type ComposerStage =
   | "idle"
@@ -27,6 +19,7 @@ type ConversationViewProps = {
   conversation: ConversationSummary;
   currentUserId: string;
   sourceLanguage: string;
+  senderVoice: string;
   onBack: () => void;
 };
 
@@ -34,17 +27,16 @@ export function ConversationView({
   conversation,
   currentUserId,
   sourceLanguage,
+  senderVoice,
   onBack,
 }: ConversationViewProps) {
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [stage, setStage] = useState<ComposerStage>("idle");
   const [transcript, setTranscript] = useState("");
-  const [recordingBlob, setRecordingBlob] =
-    useState<Blob | null>(null);
+  const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [error, setError] = useState("");
   const recorder = useVoiceRecorder();
-  const messagesContainerRef =
-    useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   const loadMessages = useCallback(async () => {
     const { data, error: loadError } = await createClient()
@@ -62,16 +54,12 @@ export function ConversationView({
   }, [conversation.id]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadMessages();
-    }, 0);
-
+    const timer = window.setTimeout(() => void loadMessages(), 0);
     return () => window.clearTimeout(timer);
   }, [loadMessages]);
 
   useEffect(() => {
     const container = messagesContainerRef.current;
-
     if (!container) return;
 
     const frame = window.requestAnimationFrame(() => {
@@ -86,7 +74,6 @@ export function ConversationView({
 
   useEffect(() => {
     const supabase = createClient();
-
     const channel = supabase
       .channel(`conversation-${conversation.id}`)
       .on(
@@ -111,9 +98,7 @@ export function ConversationView({
     setTranscript("");
     setRecordingBlob(null);
 
-    if (await recorder.start()) {
-      setStage("recording");
-    }
+    if (await recorder.start()) setStage("recording");
   }
 
   async function stop() {
@@ -134,31 +119,21 @@ export function ConversationView({
         ? "ogg"
         : "webm";
 
-    form.set(
-      "audio",
-      recording.blob,
-      `message.${extension}`,
-    );
+    form.set("audio", recording.blob, `message.${extension}`);
     form.set("sourceLanguage", sourceLanguage);
 
     try {
-      const response = await fetch(
-        "/api/interpreter/transcribe",
-        {
-          method: "POST",
-          body: form,
-        },
-      );
-
+      const response = await fetch("/api/interpreter/transcribe", {
+        method: "POST",
+        body: form,
+      });
       const data = (await response.json()) as {
         transcript?: string;
         error?: string;
       };
 
       if (!response.ok || !data.transcript) {
-        throw new Error(
-          data.error ?? "Transcription failed.",
-        );
+        throw new Error(data.error ?? "Transcription failed.");
       }
 
       setTranscript(data.transcript);
@@ -187,35 +162,38 @@ export function ConversationView({
     setStage("sending");
     setError("");
 
-    const supabase = createClient();
+    const targetLanguage = conversation.contact.preferred_language;
+    const needsTranslation =
+      sourceLanguage.trim().toLowerCase() !==
+      targetLanguage.trim().toLowerCase();
 
     try {
-      const response = await fetch(
-        "/api/interpreter/translate",
-        {
+      let translatedText = transcript.trim();
+      let translationStatus: VoiceMessage["translation_status"] =
+        "not_required";
+
+      if (needsTranslation) {
+        const response = await fetch("/api/interpreter/translate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            text: transcript,
+            text: transcript.trim(),
             sourceLanguage,
-            targetLanguage:
-              conversation.contact.preferred_language,
+            targetLanguage,
             includeVoice: false,
           }),
-        },
-      );
+        });
+        const data = (await response.json()) as {
+          translation?: string;
+          error?: string;
+        };
 
-      const translated = (await response.json()) as {
-        translation?: string;
-        error?: string;
-      };
+        if (!response.ok || !data.translation) {
+          throw new Error(data.error ?? "Translation failed.");
+        }
 
-      if (!response.ok || !translated.translation) {
-        throw new Error(
-          translated.error ?? "Translation failed.",
-        );
+        translatedText = data.translation;
+        translationStatus = "completed";
       }
 
       const extension = recordingBlob.type.includes("mp4")
@@ -223,10 +201,10 @@ export function ConversationView({
         : recordingBlob.type.includes("ogg")
           ? "ogg"
           : "webm";
-
       const path =
         `${currentUserId}/${conversation.id}/` +
         `${crypto.randomUUID()}.${extension}`;
+      const supabase = createClient();
 
       const { error: uploadError } = await supabase.storage
         .from("voice-messages")
@@ -235,26 +213,21 @@ export function ConversationView({
           upsert: false,
         });
 
-      if (uploadError) {
-        throw uploadError;
-      }
+      if (uploadError) throw uploadError;
 
-      const { error: insertError } = await supabase
-        .from("messages")
-        .insert({
-          conversation_id: conversation.id,
-          sender_id: currentUserId,
-          audio_path: path,
-          original_transcript: transcript.trim(),
-          translated_text: translated.translation,
-          source_language: sourceLanguage,
-          target_language:
-            conversation.contact.preferred_language,
-        });
+      const { error: insertError } = await supabase.from("messages").insert({
+        conversation_id: conversation.id,
+        sender_id: currentUserId,
+        audio_path: path,
+        original_transcript: transcript.trim(),
+        translated_text: translatedText,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        translation_status: translationStatus,
+        sender_voice: senderVoice,
+      });
 
-      if (insertError) {
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
       reset();
       await loadMessages();
@@ -275,6 +248,7 @@ export function ConversationView({
           type="button"
           onClick={onBack}
           className="grid h-9 w-9 place-items-center rounded-full bg-surface-soft text-lg"
+          aria-label="Back"
         >
           ‹
         </button>
@@ -290,9 +264,7 @@ export function ConversationView({
               unoptimized
             />
           ) : (
-            conversation.contact.display_name
-              .slice(0, 1)
-              .toUpperCase()
+            conversation.contact.display_name.slice(0, 1).toUpperCase()
           )}
         </div>
 
@@ -318,6 +290,11 @@ export function ConversationView({
               mine={message.sender_id === currentUserId}
             />
           ))}
+          {messages.length === 0 && (
+            <p className="py-12 text-center text-xs font-bold text-muted">
+              Record the first voice message.
+            </p>
+          )}
         </div>
       </div>
 
@@ -340,17 +317,17 @@ export function ConversationView({
             className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-red-500 text-sm font-black text-white"
           >
             <MicrophoneIcon className="h-5 w-5" />
-            Tap to stop ·{" "}
-            {formatRecordingTime(recorder.durationMs)}
+            Tap to stop · {formatRecordingTime(recorder.durationMs)}
           </button>
         )}
 
-        {(stage === "transcribing" ||
-          stage === "sending") && (
+        {(stage === "transcribing" || stage === "sending") && (
           <div className="rounded-2xl bg-accent-soft p-4 text-center text-xs font-black text-accent-strong">
             {stage === "transcribing"
               ? "Understanding your voice…"
-              : "Translating and sending…"}
+              : sourceLanguage === conversation.contact.preferred_language
+                ? "Sending original voice…"
+                : "Translating and sending…"}
           </div>
         )}
 
@@ -358,12 +335,9 @@ export function ConversationView({
           <div>
             <textarea
               value={transcript}
-              onChange={(event) =>
-                setTranscript(event.target.value)
-              }
+              onChange={(event) => setTranscript(event.target.value)}
               className="min-h-20 w-full resize-none rounded-2xl border border-border bg-surface-soft p-3 text-sm font-bold outline-none focus:border-accent"
             />
-
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -372,7 +346,6 @@ export function ConversationView({
               >
                 Record again
               </button>
-
               <button
                 type="button"
                 disabled={!transcript.trim()}
@@ -406,71 +379,62 @@ function MessageBubble({
   const [playing, setPlaying] = useState(false);
 
   async function playOriginal() {
-    const supabase = createClient();
-
-    const { data, error } = await supabase.storage
+    const { data, error } = await createClient().storage
       .from("voice-messages")
       .createSignedUrl(message.audio_path, 120);
 
     if (error || !data?.signedUrl) return;
 
     const audio = new Audio(data.signedUrl);
-
     setPlaying(true);
     audio.onended = () => setPlaying(false);
     audio.onerror = () => setPlaying(false);
-
     await audio.play();
   }
 
   async function playTranslated() {
-    setPlaying(true);
+    if (message.translation_status === "not_required") {
+      await playOriginal();
+      return;
+    }
 
+    setPlaying(true);
     try {
       const response = await fetch("/api/messages/speech", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: message.translated_text,
           language: message.target_language,
+          voice: message.sender_voice,
         }),
       });
-
       const data = (await response.json()) as {
         audioBase64?: string;
         audioMimeType?: string;
+        error?: string;
       };
 
-      if (!data.audioBase64) {
-        setPlaying(false);
-        return;
+      if (!response.ok || !data.audioBase64) {
+        throw new Error(data.error ?? "Voice playback failed.");
       }
 
       const bytes = Uint8Array.from(
         atob(data.audioBase64),
         (character) => character.charCodeAt(0),
       );
-
       const url = URL.createObjectURL(
-        new Blob([bytes], {
-          type: data.audioMimeType ?? "audio/mpeg",
-        }),
+        new Blob([bytes], { type: data.audioMimeType ?? "audio/mpeg" }),
       );
-
       const audio = new Audio(url);
-
       audio.onended = () => {
         setPlaying(false);
         URL.revokeObjectURL(url);
       };
-
       audio.onerror = () => {
         setPlaying(false);
         URL.revokeObjectURL(url);
       };
-
       await audio.play();
     } catch {
       setPlaying(false);
@@ -482,16 +446,10 @@ function MessageBubble({
     : message.translated_text;
 
   return (
-    <div
-      className={`flex ${
-        mine ? "justify-end" : "justify-start"
-      }`}
-    >
+    <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <article
         className={`max-w-[84%] rounded-2xl p-3 ${
-          mine
-            ? "bg-accent-soft"
-            : "bg-foreground text-white"
+          mine ? "bg-accent-soft" : "bg-foreground text-white"
         }`}
       >
         <button
@@ -503,9 +461,7 @@ function MessageBubble({
           {playing ? "Playing…" : "▶ Play voice"}
         </button>
 
-        <p className="text-sm font-bold leading-6">
-          {displayed}
-        </p>
+        <p className="text-sm font-bold leading-6">{displayed}</p>
 
         <div className="mt-2 flex items-center justify-between gap-3">
           <button
@@ -515,15 +471,11 @@ function MessageBubble({
           >
             {expanded ? "Hide original" : "View original"}
           </button>
-
           <span className="text-[9px] font-bold opacity-55">
-            {new Date(message.created_at).toLocaleTimeString(
-              [],
-              {
-                hour: "2-digit",
-                minute: "2-digit",
-              },
-            )}
+            {new Date(message.created_at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
             {mine ? " ✓" : ""}
           </span>
         </div>
@@ -533,12 +485,10 @@ function MessageBubble({
             <p className="text-[10px] font-black uppercase tracking-widest opacity-60">
               Original
             </p>
-
             <p className="mt-1 text-xs font-semibold leading-5">
               {message.original_transcript}
             </p>
-
-            {!mine && (
+            {!mine && message.translation_status !== "not_required" && (
               <button
                 type="button"
                 onClick={playOriginal}
