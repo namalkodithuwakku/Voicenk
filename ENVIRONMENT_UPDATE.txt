@@ -1,0 +1,5 @@
+Add this server-only variable to .env.local and Vercel:
+
+SUPABASE_SECRET_KEY=your_supabase_secret_key
+
+Do not use NEXT_PUBLIC_ for this value.

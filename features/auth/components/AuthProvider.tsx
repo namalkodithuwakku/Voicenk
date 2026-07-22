@@ -98,6 +98,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => subscription.unsubscribe();
   }, [configured, loadProfile]);
 
+
+  useEffect(() => {
+    if (!configured || !user) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`own-profile-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${user.id}`,
+        },
+        () => void loadProfile(user.id),
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [configured, loadProfile, user]);
+
   const signOut = useCallback(async () => {
     if (!configured) return;
 

@@ -39,6 +39,9 @@ export function ProfileScreen({ onSignIn }: { onSignIn: () => void }) {
   const [previewing, setPreviewing] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const selectedVoice = useMemo(
     () => voiceOptions.find((item) => item.value === voice) ?? voiceOptions[1],
@@ -201,6 +204,38 @@ export function ProfileScreen({ onSignIn }: { onSignIn: () => void }) {
       );
     } finally {
       setPreviewing("");
+    }
+  }
+
+  async function deleteAccount() {
+    if (deleteConfirmation !== "DELETE") {
+      setError('Type DELETE exactly to confirm account deletion.');
+      return;
+    }
+
+    setDeleting(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/profile/delete-account", {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Account deletion failed.");
+      }
+
+      await signOut();
+      window.location.assign("/");
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Account deletion failed.",
+      );
+      setDeleting(false);
     }
   }
 
@@ -402,6 +437,58 @@ export function ProfileScreen({ onSignIn }: { onSignIn: () => void }) {
         >
           Sign out
         </button>
+
+        {!deleteOpen ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteOpen(true);
+              setDeleteConfirmation("");
+              setError("");
+            }}
+            className="mt-5 min-h-12 w-full rounded-xl border border-red-200 bg-red-50 px-5 font-black text-red-700"
+          >
+            Delete account
+          </button>
+        ) : (
+          <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4">
+            <p className="text-sm font-black text-red-800">
+              Permanently delete this VoiceNK account?
+            </p>
+            <p className="mt-2 text-xs font-semibold leading-5 text-red-700">
+              This removes your profile, contacts, memberships and owned voice
+              recordings. This action cannot be undone. Type DELETE to continue.
+            </p>
+            <input
+              value={deleteConfirmation}
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+              className="mt-3 min-h-12 w-full rounded-xl border border-red-200 bg-white px-3 font-black outline-none focus:border-red-500"
+            />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => {
+                  setDeleteOpen(false);
+                  setDeleteConfirmation("");
+                }}
+                className="min-h-12 rounded-xl bg-white text-xs font-black text-foreground disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting || deleteConfirmation !== "DELETE"}
+                onClick={() => void deleteAccount()}
+                className="min-h-12 rounded-xl bg-red-600 text-xs font-black text-white disabled:opacity-40"
+              >
+                {deleting ? "Deleting…" : "Delete forever"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

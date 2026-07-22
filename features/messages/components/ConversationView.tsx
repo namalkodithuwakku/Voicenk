@@ -13,6 +13,7 @@ type ComposerStage =
   | "recording"
   | "transcribing"
   | "review"
+  | "review_voice"
   | "sending";
 
 type ConversationViewProps = {
@@ -110,6 +111,18 @@ export function ConversationView({
     }
 
     setRecordingBlob(recording.blob);
+
+    const targetLanguage = conversation.contact.preferred_language;
+    const needsTranslation =
+      sourceLanguage.trim().toLowerCase() !==
+      targetLanguage.trim().toLowerCase();
+
+    if (!needsTranslation) {
+      setTranscript("");
+      setStage("review_voice");
+      return;
+    }
+
     setStage("transcribing");
 
     const form = new FormData();
@@ -157,7 +170,7 @@ export function ConversationView({
   }
 
   async function send() {
-    if (!recordingBlob || !transcript.trim()) return;
+    if (!recordingBlob) return;
 
     setStage("sending");
     setError("");
@@ -168,16 +181,23 @@ export function ConversationView({
       targetLanguage.trim().toLowerCase();
 
     try {
-      let translatedText = transcript.trim();
+      const confirmedTranscript = transcript.trim();
+      let translatedText: string | null = null;
+      let originalTranscript: string | null = null;
       let translationStatus: VoiceMessage["translation_status"] =
         "not_required";
 
       if (needsTranslation) {
+        if (!confirmedTranscript) {
+          throw new Error("Transcript is required before translation.");
+        }
+
+        originalTranscript = confirmedTranscript;
         const response = await fetch("/api/interpreter/translate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            text: transcript.trim(),
+            text: confirmedTranscript,
             sourceLanguage,
             targetLanguage,
             includeVoice: false,
@@ -219,7 +239,7 @@ export function ConversationView({
         conversation_id: conversation.id,
         sender_id: currentUserId,
         audio_path: path,
-        original_transcript: transcript.trim(),
+        original_transcript: originalTranscript,
         translated_text: translatedText,
         source_language: sourceLanguage,
         target_language: targetLanguage,
@@ -358,6 +378,32 @@ export function ConversationView({
           </div>
         )}
 
+        {stage === "review_voice" && (
+          <div className="rounded-2xl bg-surface-soft p-3">
+            <p className="text-sm font-black">Voice message ready</p>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              Both users use the same language, so VoiceNK will send the
+              original recording without transcription, translation or AI voice.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={reset}
+                className="min-h-12 rounded-xl bg-surface text-xs font-black"
+              >
+                Record again
+              </button>
+              <button
+                type="button"
+                onClick={send}
+                className="min-h-12 rounded-xl bg-accent text-xs font-black"
+              >
+                Send voice
+              </button>
+            </div>
+          </div>
+        )}
+
         {(error || recorder.permissionError) && (
           <p className="mt-2 rounded-xl bg-red-50 p-2 text-xs font-bold text-red-700">
             {error || recorder.permissionError}
@@ -441,9 +487,10 @@ function MessageBubble({
     }
   }
 
-  const displayed = mine
-    ? message.original_transcript
-    : message.translated_text;
+  const displayed =
+    (mine ? message.original_transcript : message.translated_text) ??
+    "Voice message";
+  const hasOriginalTranscript = Boolean(message.original_transcript?.trim());
 
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
@@ -464,13 +511,17 @@ function MessageBubble({
         <p className="text-sm font-bold leading-6">{displayed}</p>
 
         <div className="mt-2 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => setExpanded((current) => !current)}
-            className="text-[10px] font-black opacity-65"
-          >
-            {expanded ? "Hide original" : "View original"}
-          </button>
+          {hasOriginalTranscript ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((current) => !current)}
+              className="text-[10px] font-black opacity-65"
+            >
+              {expanded ? "Hide original" : "View original"}
+            </button>
+          ) : (
+            <span />
+          )}
           <span className="text-[9px] font-bold opacity-55">
             {new Date(message.created_at).toLocaleTimeString([], {
               hour: "2-digit",
@@ -480,13 +531,13 @@ function MessageBubble({
           </span>
         </div>
 
-        {expanded && (
+        {expanded && hasOriginalTranscript && (
           <div className="mt-2 border-t border-current/15 pt-2">
             <p className="text-[10px] font-black uppercase tracking-widest opacity-60">
               Original
             </p>
             <p className="mt-1 text-xs font-semibold leading-5">
-              {message.original_transcript}
+              {message.original_transcript ?? ""}
             </p>
             {!mine && message.translation_status !== "not_required" && (
               <button

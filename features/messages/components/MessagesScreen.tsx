@@ -117,9 +117,9 @@ export function MessagesScreen({ onSignIn }: { onSignIn: () => void }) {
           id: contact.conversation_id,
           contact: contact.profile,
           lastMessage: latest
-            ? latest.sender_id === user.id
-              ? latest.original_transcript
-              : latest.translated_text
+            ? (latest.sender_id === user.id
+                ? latest.original_transcript
+                : latest.translated_text) ?? "Voice message"
             : "Start a voice conversation",
           lastMessageAt: latest?.created_at ?? null,
           unreadCount: 0,
@@ -137,6 +137,20 @@ export function MessagesScreen({ onSignIn }: { onSignIn: () => void }) {
       });
 
     setConversations(nextConversations);
+    setSelected((current) => {
+      if (!current) return null;
+
+      const refreshed = contactRows.find(
+        (item) => item.conversation_id === current.id,
+      );
+
+      return refreshed
+        ? {
+            ...current,
+            contact: refreshed.profile,
+          }
+        : current;
+    });
     setError("");
   }, [user]);
 
@@ -163,6 +177,11 @@ export function MessagesScreen({ onSignIn }: { onSignIn: () => void }) {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "contacts" },
+        () => void load(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "profiles" },
         () => void load(),
       )
       .subscribe();

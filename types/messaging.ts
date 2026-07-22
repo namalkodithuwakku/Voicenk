@@ -22,8 +22,8 @@ export type VoiceMessage = {
   conversation_id: string;
   sender_id: string;
   audio_path: string;
-  original_transcript: string;
-  translated_text: string;
+  original_transcript: string | null;
+  translated_text: string | null;
   source_language: string;
   target_language: string;
   translation_status: "required" | "completed" | "not_required" | "failed";
