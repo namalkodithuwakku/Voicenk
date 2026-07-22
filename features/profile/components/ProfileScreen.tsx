@@ -107,6 +107,13 @@ export function ProfileScreen({ onSignIn }: { onSignIn: () => void }) {
   async function saveProfile(event: FormEvent) {
     event.preventDefault();
 
+    if (!user) {
+      setError("You must be signed in to update your profile.");
+      return;
+    }
+
+    const userId = user.id;
+
     const cleanName = displayName.trim();
     const cleanId = normalizeId(voicenkId);
 
@@ -135,7 +142,7 @@ export function ProfileScreen({ onSignIn }: { onSignIn: () => void }) {
         profile_visibility: visibility,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", user.id);
+      .eq("id", userId);
 
     if (updateError) {
       setError(
