@@ -8,6 +8,13 @@ import { formatRecordingTime } from "@/lib/audio";
 import { useVoiceRecorder } from "@/features/interpreter/hooks/useVoiceRecorder";
 import type { ConversationSummary, VoiceMessage } from "@/types/messaging";
 
+type DeletableVoiceMessage = VoiceMessage & {
+  deleted_for_everyone?: boolean | null;
+  deleted_by_sender?: boolean | null;
+  deleted_by_receiver?: boolean | null;
+  deleted_at?: string | null;
+};
+
 type ComposerStage =
   | "idle"
   | "recording"
@@ -31,7 +38,7 @@ export function ConversationView({
   senderVoice,
   onBack,
 }: ConversationViewProps) {
-  const [messages, setMessages] = useState<VoiceMessage[]>([]);
+  const [messages, setMessages] = useState<DeletableVoiceMessage[]>([]);
   const [stage, setStage] = useState<ComposerStage>("idle");
   const [transcript, setTranscript] = useState("");
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
@@ -51,8 +58,30 @@ export function ConversationView({
       return;
     }
 
-    setMessages((data ?? []) as VoiceMessage[]);
-  }, [conversation.id]);
+    const visibleMessages = ((data ?? []) as DeletableVoiceMessage[]).filter(
+      (message) => {
+        if (message.deleted_for_everyone) return true;
+
+        if (
+          message.sender_id === currentUserId &&
+          message.deleted_by_sender
+        ) {
+          return false;
+        }
+
+        if (
+          message.sender_id !== currentUserId &&
+          message.deleted_by_receiver
+        ) {
+          return false;
+        }
+
+        return true;
+      },
+    );
+
+    setMessages(visibleMessages);
+  }, [conversation.id, currentUserId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadMessages(), 0);
@@ -80,7 +109,7 @@ export function ConversationView({
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "messages",
           filter: `conversation_id=eq.${conversation.id}`,
@@ -308,6 +337,8 @@ export function ConversationView({
               key={message.id}
               message={message}
               mine={message.sender_id === currentUserId}
+              currentUserId={currentUserId}
+              onRefresh={loadMessages}
             />
           ))}
           {messages.length === 0 && (
@@ -417,14 +448,38 @@ export function ConversationView({
 function MessageBubble({
   message,
   mine,
+  currentUserId,
+  onRefresh,
 }: {
-  message: VoiceMessage;
+  message: DeletableVoiceMessage;
   mine: boolean;
+  currentUserId: string;
+  onRefresh: () => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function beginLongPress() {
+    clearLongPress();
+
+    longPressTimerRef.current = setTimeout(() => {
+      setMenuOpen(true);
+    }, 600);
+  }
+
+  function clearLongPress() {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
 
   async function playOriginal() {
+    if (!message.audio_path || message.deleted_for_everyone) return;
+
     const { data, error } = await createClient().storage
       .from("voice-messages")
       .createSignedUrl(message.audio_path, 120);
@@ -432,19 +487,24 @@ function MessageBubble({
     if (error || !data?.signedUrl) return;
 
     const audio = new Audio(data.signedUrl);
+
     setPlaying(true);
     audio.onended = () => setPlaying(false);
     audio.onerror = () => setPlaying(false);
+
     await audio.play();
   }
 
   async function playTranslated() {
+    if (message.deleted_for_everyone) return;
+
     if (message.translation_status === "not_required") {
       await playOriginal();
       return;
     }
 
     setPlaying(true);
+
     try {
       const response = await fetch("/api/messages/speech", {
         method: "POST",
@@ -455,6 +515,7 @@ function MessageBubble({
           voice: message.sender_voice,
         }),
       });
+
       const data = (await response.json()) as {
         audioBase64?: string;
         audioMimeType?: string;
@@ -469,88 +530,275 @@ function MessageBubble({
         atob(data.audioBase64),
         (character) => character.charCodeAt(0),
       );
+
       const url = URL.createObjectURL(
-        new Blob([bytes], { type: data.audioMimeType ?? "audio/mpeg" }),
+        new Blob([bytes], {
+          type: data.audioMimeType ?? "audio/mpeg",
+        }),
       );
+
       const audio = new Audio(url);
+
       audio.onended = () => {
         setPlaying(false);
         URL.revokeObjectURL(url);
       };
+
       audio.onerror = () => {
         setPlaying(false);
         URL.revokeObjectURL(url);
       };
+
       await audio.play();
     } catch {
       setPlaying(false);
     }
   }
 
-  const displayed =
-    (mine ? message.original_transcript : message.translated_text) ??
-    "Voice message";
-  const hasOriginalTranscript = Boolean(message.original_transcript?.trim());
+  async function copyTranscript() {
+    const textToCopy =
+      (mine ? message.original_transcript : message.translated_text) ??
+      message.original_transcript ??
+      message.translated_text ??
+      "";
 
-  return (
-    <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-      <article
-        className={`max-w-[84%] rounded-2xl p-3 ${
-          mine ? "bg-accent-soft" : "bg-foreground text-white"
-        }`}
-      >
-        <button
-          type="button"
-          disabled={playing}
-          onClick={mine ? playOriginal : playTranslated}
-          className="mb-2 rounded-full bg-accent px-3 py-1.5 text-[10px] font-black text-foreground"
+    if (!textToCopy) return;
+
+    await navigator.clipboard.writeText(textToCopy);
+    setMenuOpen(false);
+  }
+
+  async function deleteForMe() {
+    setDeleting(true);
+
+    try {
+      const field =
+        message.sender_id === currentUserId
+          ? "deleted_by_sender"
+          : "deleted_by_receiver";
+
+      const { error } = await createClient()
+        .from("messages")
+        .update({ [field]: true })
+        .eq("id", message.id);
+
+      if (error) {
+        throw error;
+      }
+
+      setMenuOpen(false);
+      await onRefresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function deleteForEveryone() {
+    if (!mine) return;
+
+    const confirmed = window.confirm(
+      "Delete this voice message for everyone?",
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+
+    try {
+      const supabase = createClient();
+
+      if (message.audio_path) {
+        const { error: storageError } = await supabase.storage
+          .from("voice-messages")
+          .remove([message.audio_path]);
+
+        if (storageError) {
+          throw storageError;
+        }
+      }
+
+      const { error: updateError } = await supabase
+        .from("messages")
+        .update({
+          deleted_for_everyone: true,
+          deleted_at: new Date().toISOString(),
+          audio_path: null,
+          original_transcript: null,
+          translated_text: null,
+        })
+        .eq("id", message.id)
+        .eq("sender_id", currentUserId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      setMenuOpen(false);
+      await onRefresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (message.deleted_for_everyone) {
+    return (
+      <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+        <article
+          className={`max-w-[84%] rounded-2xl px-4 py-3 text-xs font-bold italic ${
+            mine
+              ? "bg-accent-soft text-muted"
+              : "bg-foreground text-white/65"
+          }`}
         >
-          {playing ? "Playing…" : "▶ Play voice"}
-        </button>
-
-        <p className="text-sm font-bold leading-6">{displayed}</p>
-
-        <div className="mt-2 flex items-center justify-between gap-3">
-          {hasOriginalTranscript ? (
-            <button
-              type="button"
-              onClick={() => setExpanded((current) => !current)}
-              className="text-[10px] font-black opacity-65"
-            >
-              {expanded ? "Hide original" : "View original"}
-            </button>
-          ) : (
-            <span />
-          )}
-          <span className="text-[9px] font-bold opacity-55">
+          🗑 This voice message was deleted.
+          <div className="mt-1 text-right text-[9px] not-italic opacity-55">
             {new Date(message.created_at).toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
             })}
-            {mine ? " ✓" : ""}
-          </span>
-        </div>
+          </div>
+        </article>
+      </div>
+    );
+  }
 
-        {expanded && hasOriginalTranscript && (
-          <div className="mt-2 border-t border-current/15 pt-2">
-            <p className="text-[10px] font-black uppercase tracking-widest opacity-60">
-              Original
-            </p>
-            <p className="mt-1 text-xs font-semibold leading-5">
-              {message.original_transcript ?? ""}
-            </p>
-            {!mine && message.translation_status !== "not_required" && (
+  const displayed =
+    (mine ? message.original_transcript : message.translated_text) ??
+    "Voice message";
+
+  const hasOriginalTranscript = Boolean(
+    message.original_transcript?.trim(),
+  );
+
+  return (
+    <>
+      <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+        <article
+          onPointerDown={beginLongPress}
+          onPointerUp={clearLongPress}
+          onPointerCancel={clearLongPress}
+          onPointerLeave={clearLongPress}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setMenuOpen(true);
+          }}
+          className={`max-w-[84%] select-none rounded-2xl p-3 ${
+            mine ? "bg-accent-soft" : "bg-foreground text-white"
+          }`}
+        >
+          <button
+            type="button"
+            disabled={playing}
+            onClick={mine ? playOriginal : playTranslated}
+            className="mb-2 rounded-full bg-accent px-3 py-1.5 text-[10px] font-black text-foreground"
+          >
+            {playing ? "Playing…" : "▶ Play voice"}
+          </button>
+
+          <p className="text-sm font-bold leading-6">{displayed}</p>
+
+          <div className="mt-2 flex items-center justify-between gap-3">
+            {hasOriginalTranscript ? (
               <button
                 type="button"
-                onClick={playOriginal}
-                className="mt-2 text-[10px] font-black text-accent"
+                onClick={() => setExpanded((current) => !current)}
+                className="text-[10px] font-black opacity-65"
               >
-                Play original voice
+                {expanded ? "Hide original" : "View original"}
+              </button>
+            ) : (
+              <span />
+            )}
+
+            <span className="text-[9px] font-bold opacity-55">
+              {new Date(message.created_at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {mine ? " ✓" : ""}
+            </span>
+          </div>
+
+          {expanded && hasOriginalTranscript && (
+            <div className="mt-2 border-t border-current/15 pt-2">
+              <p className="text-[10px] font-black uppercase tracking-widest opacity-60">
+                Original
+              </p>
+
+              <p className="mt-1 text-xs font-semibold leading-5">
+                {message.original_transcript ?? ""}
+              </p>
+
+              {!mine &&
+                message.translation_status !== "not_required" && (
+                  <button
+                    type="button"
+                    onClick={playOriginal}
+                    className="mt-2 text-[10px] font-black text-accent"
+                  >
+                    Play original voice
+                  </button>
+                )}
+            </div>
+          )}
+        </article>
+      </div>
+
+      {menuOpen && (
+        <div
+          className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-3 backdrop-blur-sm sm:items-center"
+          onClick={() => setMenuOpen(false)}
+        >
+          <div
+            className="safe-bottom w-full max-w-sm rounded-[1.5rem] bg-surface p-3 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="px-2 pb-2 text-[10px] font-black uppercase tracking-widest text-muted">
+              Message options
+            </p>
+
+            {(message.original_transcript ||
+              message.translated_text) && (
+              <button
+                type="button"
+                onClick={() => void copyTranscript()}
+                className="min-h-12 w-full rounded-xl px-3 text-left text-sm font-black hover:bg-surface-soft"
+              >
+                Copy transcript
               </button>
             )}
+
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => void deleteForMe()}
+              className="min-h-12 w-full rounded-xl px-3 text-left text-sm font-black hover:bg-surface-soft disabled:opacity-50"
+            >
+              Delete for me
+            </button>
+
+            {mine && (
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void deleteForEveryone()}
+                className="min-h-12 w-full rounded-xl px-3 text-left text-sm font-black text-red-600 hover:bg-red-50 disabled:opacity-50"
+              >
+                Delete for everyone
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              className="mt-2 min-h-12 w-full rounded-xl bg-surface-soft text-sm font-black"
+            >
+              Cancel
+            </button>
           </div>
-        )}
-      </article>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
+

@@ -8,10 +8,12 @@ import { InterpreterScreen } from "@/features/interpreter/components/Interpreter
 import { ProfileScreen } from "@/features/profile/components/ProfileScreen";
 import { AuthModal } from "@/features/auth/components/AuthModal";
 import { ProfileSetupModal } from "@/features/auth/components/ProfileSetupModal";
+import { NotificationManager } from "@/features/notifications/components/NotificationManager";
 import type { AppTab } from "@/types/navigation";
 
 export function AppShell() {
-  const [activeTab, setActiveTab] = useState<AppTab>("interpreter");
+  const [activeTab, setActiveTab] =
+    useState<AppTab>("interpreter");
   const [authOpen, setAuthOpen] = useState(false);
 
   return (
@@ -20,17 +22,34 @@ export function AppShell() {
 
       <section className="min-h-0 flex-1 overflow-hidden px-4 pb-20">
         {activeTab === "messages" && (
-          <MessagesScreen onSignIn={() => setAuthOpen(true)} />
+          <MessagesScreen
+            onSignIn={() => setAuthOpen(true)}
+          />
         )}
-        {activeTab === "interpreter" && <InterpreterScreen />}
+
+        {activeTab === "interpreter" && (
+          <InterpreterScreen />
+        )}
+
         {activeTab === "profile" && (
-          <ProfileScreen onSignIn={() => setAuthOpen(true)} />
+          <ProfileScreen
+            onSignIn={() => setAuthOpen(true)}
+          />
         )}
       </section>
 
-      <BottomNavigation activeTab={activeTab} onChange={setActiveTab} />
+      <BottomNavigation
+        activeTab={activeTab}
+        onChange={setActiveTab}
+      />
 
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <NotificationManager />
+
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+      />
+
       <ProfileSetupModal />
     </main>
   );

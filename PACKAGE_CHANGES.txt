@@ -1,0 +1,7 @@
+Install the required packages from the VoiceNK project folder:
+
+npm install web-push
+npm install -D @types/web-push
+
+Do not replace package.json manually unless you intentionally want to merge dependencies yourself.
+Running npm install updates package.json and package-lock.json safely.

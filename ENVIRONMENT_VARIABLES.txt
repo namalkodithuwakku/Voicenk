@@ -1,0 +1,21 @@
+Add these to .env.local and Vercel:
+
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:your-email@example.com
+PUSH_WEBHOOK_SECRET=
+SUPABASE_SECRET_KEY=
+
+Existing variables must remain unchanged:
+
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_SITE_URL=
+OPENAI_API_KEY=
+
+Security:
+- NEXT_PUBLIC_VAPID_PUBLIC_KEY is public.
+- VAPID_PRIVATE_KEY is server-only.
+- PUSH_WEBHOOK_SECRET is server-only.
+- SUPABASE_SECRET_KEY is server-only.
+- Never prefix private values with NEXT_PUBLIC_.
