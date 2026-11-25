@@ -41,17 +41,17 @@ export function InterpreterScreen() {
       const response = await fetch("/api/interpreter/transcribe", { method: "POST", body: form });
       const data = await response.json() as { transcript?: string; error?: string };
       if (!response.ok || !data.transcript) throw new Error(data.error ?? "Could not understand the recording.");
-      setTranscript(data.transcript); setStage("review");
+      setTranscript(data.transcript); await translate(data.transcript);
     } catch (e) { setError(e instanceof Error ? e.message : "Transcription failed."); setStage("idle"); }
   }
 
-  async function translate() {
-    if (!transcript.trim()) return;
+  async function translate(text: string) {
+    if (!text.trim()) return;
     setStage("translating"); setError(""); player.stop();
     try {
       const response = await fetch("/api/interpreter/translate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: transcript, sourceLanguage, targetLanguage, includeVoice: true }),
+        body: JSON.stringify({ text, sourceLanguage, targetLanguage, includeVoice: true }),
       });
       const data = await response.json() as { translation?: string; audioBase64?: string; audioMimeType?: string; error?: string };
       if (!response.ok || !data.translation) throw new Error(data.error ?? "Translation failed.");
@@ -61,7 +61,7 @@ export function InterpreterScreen() {
   }
 
   function reset() { recorder.cancel(); player.stop(); setTranscript(""); setTranslation(""); setError(""); setStage("idle"); }
-  function swap() { if (stage === "recording") return; const next = sourceLanguage === "auto" ? "en" : sourceLanguage; setSourceLanguage(targetLanguage); setTargetLanguage(next); reset(); }
+  function swap() { if (stage === "recording" || stage === "transcribing" || stage === "translating") return; const next = sourceLanguage === "auto" ? "en" : sourceLanguage; setSourceLanguage(targetLanguage); setTargetLanguage(next); reset(); }
 
   const sourceLabel = sourceLanguage === "auto" ? "Auto detect" : getLanguageName(sourceLanguage);
   const targetLabel = getLanguageName(targetLanguage);
@@ -70,15 +70,15 @@ export function InterpreterScreen() {
     <section className="flex h-full min-h-0 flex-col py-3">
       <div className="shrink-0 rounded-[1.5rem] bg-foreground p-4 text-white shadow-[var(--shadow-soft)]">
         <p className="text-[10px] font-black uppercase tracking-[0.16em] text-accent">Interpreter · No account needed</p>
-        <h1 className="mt-1.5 text-2xl font-black leading-tight tracking-[-0.04em]">Tap, speak, review, then translate.</h1>
-        <p className="mt-2 text-xs font-medium leading-5 text-white/65">Correct names, prices or dates before VoiceNK translates them.</p>
+        <h1 className="mt-1.5 text-2xl font-black leading-tight tracking-[-0.04em]">Speak and translate instantly.</h1>
+        <p className="mt-2 text-xs font-medium leading-5 text-white/65">Stop recording to automatically translate and play the result.</p>
       </div>
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-[1.5rem] border border-border bg-surface p-3.5 shadow-[var(--shadow-soft)]">
         <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <LanguageButton label="Speaker" language={sourceLabel} onClick={() => setPickerSide("source")} />
+          <LanguageButton label="Speaker" language={sourceLabel} onClick={() => { if (stage !== "recording" && stage !== "transcribing" && stage !== "translating") setPickerSide("source"); }} />
           <button type="button" onClick={swap} className="grid h-9 w-9 place-items-center rounded-full bg-accent-soft text-accent-strong"><SwapIcon className="h-4 w-4" /></button>
-          <LanguageButton label="Listener" language={targetLabel} onClick={() => setPickerSide("target")} />
+          <LanguageButton label="Listener" language={targetLabel} onClick={() => { if (stage !== "recording" && stage !== "transcribing" && stage !== "translating") setPickerSide("target"); }} />
         </div>
 
         {(stage === "idle" || stage === "recording") && (
@@ -98,12 +98,12 @@ export function InterpreterScreen() {
         {(stage === "review" || stage === "ready" || stage === "translating") && (
           <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
             <label className="text-[10px] font-black uppercase tracking-widest text-muted">Editable transcript</label>
-            <textarea value={transcript} onChange={(e) => { setTranscript(e.target.value); setTranslation(""); if (stage === "ready") setStage("review"); }}
+            <textarea value={transcript} disabled={stage === "translating"} onChange={(e) => { setTranscript(e.target.value); setTranslation(""); if (stage === "ready") setStage("review"); }}
               className="mt-2 min-h-28 w-full resize-none rounded-2xl border border-border bg-surface-soft p-3 text-sm font-bold leading-6 outline-none focus:border-accent" />
             {translation && <div className="mt-3 rounded-2xl bg-foreground p-4 text-white"><p className="text-[10px] font-black uppercase tracking-widest text-accent">{targetLabel}</p><p className="mt-2 text-lg font-black leading-7">{translation}</p><button type="button" onClick={() => void player.replay()} className="mt-3 rounded-xl bg-accent px-4 py-2 text-xs font-black text-foreground">Play again</button></div>}
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <button type="button" onClick={reset} className="min-h-12 rounded-xl bg-surface-soft text-sm font-black">Record again</button>
-              <button type="button" disabled={!transcript.trim() || stage === "translating"} onClick={translate} className="min-h-12 rounded-xl bg-accent text-sm font-black disabled:opacity-40">Translate</button>
+              <button type="button" onClick={reset} disabled={stage === "translating"} className="min-h-12 rounded-xl bg-surface-soft text-sm font-black">Record again</button>
+              <button type="button" disabled={!transcript.trim() || stage === "translating"} onClick={() => void translate(transcript)} className="min-h-12 rounded-xl bg-accent text-sm font-black disabled:opacity-40">Translate</button>
             </div>
           </div>
         )}
